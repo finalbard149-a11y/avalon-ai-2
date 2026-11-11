@@ -48,7 +48,11 @@ async function advance(g){
    }break;
   }
   if(g.phase==='VOTING'){
-   if(HUMAN in g.votes){for(let s=1;s<=7;s++)if(s!==HUMAN&&g.phase==='VOTING')await aiAction(g,s,'VOTE');}break;
+   if(HUMAN in g.votes){
+    for(let s=1;s<=7;s++)if(s!==HUMAN&&g.phase==='VOTING')await aiAction(g,s,'VOTE');
+    if(g.phase!=='VOTING')continue;
+   }
+   break;
   }
   if(g.phase==='MISSION'){
    if(!g.team.includes(HUMAN)||HUMAN in g.cards){for(const s of g.team)if(s!==HUMAN&&g.phase==='MISSION')await aiAction(g,s,'MISSION');continue;}break;
