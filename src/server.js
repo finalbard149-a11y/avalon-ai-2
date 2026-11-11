@@ -9,7 +9,7 @@ import {authorized,checkConfig,checkPassword,sessionCookie,clearCookie} from './
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
 const HUMAN=3,PORT=Number(process.env.PORT||3000);
 function json(res,status,obj,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(obj));}
-function humanView(g){const base={...publicState(g),self:knowledge(g,HUMAN),aiMode:process.env.AVALON_AI_API_KEY?'cloud':'offline-test'};if(g.phase==='ENDED')base.roles=g.roles;return base;}
+function humanView(g){const base={...publicState(g),review:g.review||null,self:knowledge(g,HUMAN),aiMode:process.env.AVALON_AI_API_KEY?'cloud':'offline-test'};if(g.phase==='ENDED')base.roles=g.roles;return base;}
 function validCandidate(g,seat,target){const k=knowledge(g,seat);return Number.isInteger(target)&&target!==seat&&target>=1&&target<=7&&!k.evilTeammates.includes(target);}
 async function aiAction(g,seat,action){
  const d=await decide(g,seat,action);
@@ -36,30 +36,56 @@ async function aiAction(g,seat,action){
   else if(action==='ASSASSINATE'){const eligible=[1,2,3,4,5,6,7].filter(s=>validCandidate(g,seat,s));const target=eligible[Math.floor(Math.random()*eligible.length)];g.audit.push({seat,action:'ASSASSINATION_FALLBACK_COMMIT',target,preResult:true});assassinate(g,seat,target);}
  }
 }
+// Important: do not progress across public reveal screens without owner confirmation.
+function setReview(g,kind){
+ const event=[...g.events].reverse().find(e=>kind==='VOTE' ? e.type==='VOTE_REVEAL' : e.type==='MISSION_RESULT');
+ if(event)g.review={kind,payload:structuredClone(event.payload),eventSeq:event.seq};
+}
+function currentDiscussionKey(g){return `${g.round}:${g.attempt}:${g.captain}`;}
+async function openDiscussion(g){
+ if(g.phase!=='DISCUSSION'||g.captain===HUMAN)return;
+ const key=currentDiscussionKey(g);
+ if(g.discussionOpened===key)return;
+ g.discussionOpened=key;
+ const speakers=[1,2,4,5,6,7].filter(s=>s!==g.captain);
+ for(const seat of speakers.slice(0,2))await aiAction(g,seat,'SPEAK');
+}
+async function respondToHuman(g,text){
+ if(!['DISCUSSION','VOTING','MISSION'].includes(g.phase) && !g.review)return;
+ // A directly addressed NPC answers, another NPC may contribute. Both get separate authorized perspectives.
+ const addressed=[...String(text).matchAll(/(?:^|[^0-9])([124567])\s*號/g)].map(m=>Number(m[1]));
+ const choices=[1,2,4,5,6,7];
+ const lead=addressed.find(s=>choices.includes(s))??choices[(g.publicMessages.length + g.round)%choices.length];
+ const second=choices.find(s=>s!==lead && s!==g.captain)??choices.find(s=>s!==lead);
+ await aiAction(g,lead,'SPEAK');
+ if(second!==undefined && g.phase!=='ENDED')await aiAction(g,second,'SPEAK');
+}
 async function advance(g){
  let count=0;
- while(count++<35){
-  if(g.phase==='ENDED')break;
+ while(count++<30){
+  if(g.phase==='ENDED'||g.review)break;
   if(g.phase==='DISCUSSION'){
-   if(g.captain!==HUMAN){
-    const speakers=[1,2,3,4,5,6,7].filter(s=>s!==HUMAN&&s!==g.captain);
-    for(const s of speakers.slice(0,2))await aiAction(g,s,'SPEAK');
-    await aiAction(g,g.captain,'PROPOSE');continue;
-   }break;
+   await openDiscussion(g);
+   // Proposal is an explicit owner-controlled step, including when NPC is captain.
+   break;
   }
   if(g.phase==='VOTING'){
    if(HUMAN in g.votes){
-    for(let s=1;s<=7;s++)if(s!==HUMAN&&!(s in g.votes)&&g.phase==='VOTING')await aiAction(g,s,'VOTE');
-    if(g.phase!=='VOTING')continue;
+    for(let seat=1;seat<=7;seat++)if(seat!==HUMAN&&!(seat in g.votes)&&g.phase==='VOTING')await aiAction(g,seat,'VOTE');
+    if(g.phase!=='VOTING'){setReview(g,'VOTE');break;}
    }
    break;
   }
   if(g.phase==='MISSION'){
-   if(!g.team.includes(HUMAN)||HUMAN in g.cards){for(const s of g.team)if(s!==HUMAN&&!(s in g.cards)&&g.phase==='MISSION')await aiAction(g,s,'MISSION');continue;}break;
+   if(!g.team.includes(HUMAN)||HUMAN in g.cards){
+    for(const seat of [...g.team])if(seat!==HUMAN&&!(seat in g.cards)&&g.phase==='MISSION')await aiAction(g,seat,'MISSION');
+    if(g.phase!=='MISSION'){setReview(g,'MISSION');break;}
+   }
+   break;
   }
   if(g.phase==='ASSASSINATION'){
-   const assassin=Number(Object.keys(g.roles).find(s=>g.roles[s]==='ASSASSIN'));
-   if(assassin!==HUMAN){await aiAction(g,assassin,'ASSASSINATE');continue;}break;
+   const assassin=Number(Object.keys(g.roles).find(seat=>g.roles[seat]==='ASSASSIN'));
+   if(assassin!==HUMAN){await aiAction(g,assassin,'ASSASSINATE');break;}
   }
   break;
  }
@@ -100,6 +126,20 @@ const server=http.createServer(async(req,res)=>{
     const g=createGame();g.audit=[];await advance(g);await saveNewGame(g);
     return json(res,200,humanView(g));
    }
+  if(req.method==='POST'&&u.pathname==='/api/continue'){
+   const p=await bodyJSON(req);
+   if(!Number.isInteger(p.revision))return json(res,400,{error:'revision required'});
+   const g=await mutateGame(p.revision,async game=>{
+    if(game.review){game.review=null;await advance(game);return;}
+    if(game.phase==='DISCUSSION' && game.captain!==HUMAN){
+     await openDiscussion(game);
+     await aiAction(game,game.captain,'PROPOSE');
+     return;
+    }
+    throw Error('目前沒有需要繼續的階段');
+   });
+   return json(res,200,humanView(g));
+  }
   if(req.method==='POST'&&u.pathname==='/api/new'){
    const previous=await getGame();if(previous&&previous.phase!=='ENDED')return json(res,409,{error:'finish current game before starting a new one'});
    const g=createGame();g.audit=[];await advance(g);await saveNewGame(g);return json(res,200,humanView(g));
@@ -107,7 +147,8 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='POST'&&u.pathname==='/api/action'){
    const p=await bodyJSON(req);if(!Number.isInteger(p.revision))return json(res,400,{error:'revision required'});
    const g=await mutateGame(p.revision,async(g)=>{
-    if(p.type==='SPEAK')speak(g,HUMAN,p.text);
+    if(g.review&&p.type!=='SPEAK')throw Error('請先確認上一階段結果');
+    if(p.type==='SPEAK'){speak(g,HUMAN,p.text);await respondToHuman(g,p.text);return;}
     else if(p.type==='PROPOSE')propose(g,HUMAN,p.team);
     else if(p.type==='VOTE')vote(g,HUMAN,p.approve);
     else if(p.type==='MISSION')mission(g,HUMAN,p.fail);

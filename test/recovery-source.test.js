@@ -12,8 +12,8 @@ test('resume and reset are behind authentication',()=>{
 });
 test('resume uses saved revision and runs NPC advancement',()=>{
  assert.match(server,/mutateGame\(p\.revision,async game=>\{await advance\(game\);\}\)/);
- assert.match(server,/!\(s in g\.cards\)/);
- assert.match(server,/!\(s in g\.votes\)/);
+ assert.match(server,/!\((?:seat|s) in g\.cards\)/);
+ assert.match(server,/!\((?:seat|s) in g\.votes\)/);
 });
 test('reset UI requires a confirmation and clears success error',()=>{
  assert.match(ui,/window\.confirm\(/);
