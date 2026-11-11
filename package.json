@@ -1,0 +1,9 @@
+{
+  "name": "avalon-ai-2-cloud-alpha",
+  "version": "2.0.0-alpha.1",
+  "type": "module",
+  "private": true,
+  "engines": {"node": ">=20"},
+  "scripts": {"start": "node src/server.js", "test": "node --test test/*.test.js", "check": "node --check src/server.js && node --check src/agents.js"},
+  "dependencies": {"pg": "^8.13.3"}
+}
