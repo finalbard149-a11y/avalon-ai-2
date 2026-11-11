@@ -49,13 +49,13 @@ async function advance(g){
   }
   if(g.phase==='VOTING'){
    if(HUMAN in g.votes){
-    for(let s=1;s<=7;s++)if(s!==HUMAN&&g.phase==='VOTING')await aiAction(g,s,'VOTE');
+    for(let s=1;s<=7;s++)if(s!==HUMAN&&!(s in g.votes)&&g.phase==='VOTING')await aiAction(g,s,'VOTE');
     if(g.phase!=='VOTING')continue;
    }
    break;
   }
   if(g.phase==='MISSION'){
-   if(!g.team.includes(HUMAN)||HUMAN in g.cards){for(const s of g.team)if(s!==HUMAN&&g.phase==='MISSION')await aiAction(g,s,'MISSION');continue;}break;
+   if(!g.team.includes(HUMAN)||HUMAN in g.cards){for(const s of g.team)if(s!==HUMAN&&!(s in g.cards)&&g.phase==='MISSION')await aiAction(g,s,'MISSION');continue;}break;
   }
   if(g.phase==='ASSASSINATION'){
    const assassin=Number(Object.keys(g.roles).find(s=>g.roles[s]==='ASSASSIN'));
@@ -86,6 +86,20 @@ const server=http.createServer(async(req,res)=>{
    const g=await getGame();if(!g||g.phase!=='ENDED')return json(res,403,{error:'audit available after game'});
    return json(res,200,{audit:g.audit||[],npcMemory:g.npcMemory});
   }
+   // Explicitly resume a previously saved state. GET /api/state stays read-only.
+   if(req.method==='POST'&&u.pathname==='/api/resume'){
+    const p=await bodyJSON(req);
+    if(!Number.isInteger(p.revision))return json(res,400,{error:'revision required'});
+    const g=await mutateGame(p.revision,async game=>{await advance(game);});
+    return json(res,200,humanView(g));
+   }
+   // Explicit administrative reset; preserves the old game record in PostgreSQL.
+   if(req.method==='POST'&&u.pathname==='/api/reset'){
+    const p=await bodyJSON(req);
+    if(p.confirm!=='RESET')return json(res,400,{error:'請確認放棄目前對局'});
+    const g=createGame();g.audit=[];await advance(g);await saveNewGame(g);
+    return json(res,200,humanView(g));
+   }
   if(req.method==='POST'&&u.pathname==='/api/new'){
    const previous=await getGame();if(previous&&previous.phase!=='ENDED')return json(res,409,{error:'finish current game before starting a new one'});
    const g=createGame();g.audit=[];await advance(g);await saveNewGame(g);return json(res,200,humanView(g));
