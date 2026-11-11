@@ -8,7 +8,8 @@ const game=()=>createGame({roles});
 const src=p=>readFileSync(new URL(p,import.meta.url),'utf8');
 test('Gemini request is server-side authorized perspective only',()=>{
  const g=game();const request=geminiPayload(g,2,'SPEAK');
- assert.equal(request.model,'gemini-2.5-flash');
+ assert.equal(request.model,'gemini-3.5-flash-lite');
+ assert.equal(request.body.generationConfig.thinkingConfig.thinkingLevel,'minimal');
  assert.equal(request.body.generationConfig.responseMimeType,'application/json');
  const view=JSON.parse(request.body.contents[0].parts[0].text);
  assert.equal(view.self.role,'ASSASSIN');

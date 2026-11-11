@@ -1,8 +1,8 @@
 import {EVIL,knowledge,perspective,auditHash,shuffle,SIZES} from './core.js';
 import {reserveCall} from './quota.js';
 
-const MODEL=process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const ALLOWED_MODELS=new Set(['gemini-2.5-flash','gemini-2.5-flash-lite']);
+const MODEL=process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+const ALLOWED_MODELS=new Set(['gemini-3.5-flash-lite','gemini-3.8-flash','gemini-2.5-flash','gemini-2.5-flash-lite']);
 const seats=[1,2,3,4,5,6,7];
 export const cloudEnabled=()=>Boolean(process.env.GEMINI_API_KEY);
 
@@ -32,8 +32,16 @@ export function sanitizedRequest(g,seat,action){
 }
 export function geminiPayload(g,seat,action){
  const r=sanitizedRequest(g,seat,action);
- if(!ALLOWED_MODELS.has(r.model))throw Error('GEMINI_MODEL must be gemini-2.5-flash or gemini-2.5-flash-lite (free-tier eligible models only)');
- return {model:r.model,body:{systemInstruction:{parts:[{text:r.instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(r.view)}]}],generationConfig:{responseMimeType:'application/json',temperature:action==='SPEAK'?0.7:0.25,maxOutputTokens:action==='ASSASSINATE'?1400:550,thinkingConfig:{thinkingBudget:action==='ASSASSINATE'?512:0}}}};
+ if(!ALLOWED_MODELS.has(r.model))throw Error('GEMINI_MODEL is not on the configured model allowlist');
+ const newModel=r.model.startsWith('gemini-3.');
+ const generationConfig={responseMimeType:'application/json',maxOutputTokens:action==='ASSASSINATE'?2500:1200};
+ if(newModel){
+  generationConfig.thinkingConfig={thinkingLevel:action==='ASSASSINATE'?'medium':(r.model==='gemini-3.8-flash'?'low':'minimal')};
+ }else{
+  generationConfig.temperature=action==='SPEAK'?0.7:0.25;
+  generationConfig.thinkingConfig={thinkingBudget:action==='ASSASSINATE'?512:0};
+ }
+ return {model:r.model,body:{systemInstruction:{parts:[{text:r.instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(r.view)}]}],generationConfig}};
 }
 
 export async function decide(g,seat,action){
