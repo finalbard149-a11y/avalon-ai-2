@@ -3,13 +3,14 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {createGame,publicState,knowledge,speak,propose,vote,mission,assassinate,EVIL,SIZES} from './core.js';
-import {decide} from './agents.js';
+import {decide,cloudEnabled} from './agents.js';
+import {DAILY_LIMIT,GAME_LIMIT} from './quota.js';
 import {initializeStore,getGame,saveNewGame,mutateGame} from './store.js';
 import {authorized,checkConfig,checkPassword,sessionCookie,clearCookie} from './auth.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
 const HUMAN=3,PORT=Number(process.env.PORT||3000);
 function json(res,status,obj,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});res.end(JSON.stringify(obj));}
-function humanView(g){const base={...publicState(g),review:g.review||null,self:knowledge(g,HUMAN),aiMode:process.env.AVALON_AI_API_KEY?'cloud':'offline-test'};if(g.phase==='ENDED')base.roles=g.roles;return base;}
+function humanView(g){const base={...publicState(g),review:g.review||null,self:knowledge(g,HUMAN),aiMode:cloudEnabled()?'cloud':'offline-test',aiUsage:{game:g.aiCallCount||0,gameLimit:GAME_LIMIT,dailyLimit:DAILY_LIMIT}};if(g.phase==='ENDED')base.roles=g.roles;return base;}
 function validCandidate(g,seat,target){const k=knowledge(g,seat);return Number.isInteger(target)&&target!==seat&&target>=1&&target<=7&&!k.evilTeammates.includes(target);}
 async function aiAction(g,seat,action){
  const d=await decide(g,seat,action);
