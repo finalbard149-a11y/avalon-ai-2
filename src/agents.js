@@ -1,6 +1,6 @@
 import {EVIL,knowledge,perspective,auditHash,shuffle,SIZES} from './core.js';
 import {reserveCall} from './quota.js';
-import {anyCloudConfigured,requestSpec,callProvider,seatConfig} from './providers.js';
+import {anyCloudConfigured,requestSpec,callProvider,seatConfig,fallbackConfig} from './providers.js';
 import {safePromptRules,zeroCostDecision} from './strategy.js';
 import {GAME_LIMIT} from './quota.js';
 const seats=[1,2,3,4,5,6,7];
@@ -38,16 +38,29 @@ export async function decide(g,seat,action){
   // Preserve one possible model request for the assassin, plus room for proposals.
   // Once speech budget ends, pause dialogue rather than silently faking an AI answer.
   const gameCount=g.aiCallCount??0;
-  const speechCap=Math.max(1,Math.min(18,GAME_LIMIT-6));
-  if(action==='SPEAK'&&gameCount>=speechCap)throw Error(`AI_DEBATE_BUDGET: 本局討論額度已達 ${speechCap} 次，請保留剩餘額度供組隊與刺殺。`);
+  const speechCap=Math.max(1,GAME_LIMIT-3);
+  if(action==='SPEAK'&&gameCount>=speechCap)throw Error(`AI_DEBATE_BUDGET: 本局已使用 ${gameCount} 次，最後 3 次優先保留給組隊與刺殺。`);
   if((action==='PROPOSE'&&gameCount>=GAME_LIMIT-1)||(action==='ASSASSINATE'&&gameCount>=GAME_LIMIT)){
    const output=zeroCostDecision(g,seat,action);
    g.budgetNotice='本局模型請求額度已預留或用盡：這一步改由公開標示的個人規則策略執行，沒有呼叫 AI。';
    g.audit??=[];g.audit.push({seat,action,source:'quota-degraded-private-strategy-2.4',inputHash:auditHash(perspective(g,seat)),outputHash:auditHash(output),output,time:new Date().toISOString(),eventSeq:g.revision});
    return output;
   }
-  await reserveCall(g);
-  output=await callProvider(spec);
+  await reserveCall(g,seat,spec.provider);
+  try{output=await callProvider(spec);}
+  catch(primaryError){
+   // Only an explicitly configured, validated alternative may be tried.
+   // Every alternative call is reserved and counted separately.
+   const alternate=fallbackConfig(seat);
+   const retryable=/AI_QUOTA|AI_MODEL_NOT_FOUND|AI_NETWORK_ERROR|AI_INVALID_JSON|AI_EMPTY_RESPONSE/.test(String(primaryError.message));
+   if(!alternate||!retryable)throw primaryError;
+   const backup=requestSpec({seat,action,...perspectiveInput,routeOverride:alternate});
+   await reserveCall(g,seat,backup.provider);
+   output=await callProvider(backup);
+   source=backup.provider;model=backup.model;
+   inputHash=auditHash({provider:backup.provider,model:backup.model,body:backup.body});
+   g.budgetNotice=`${seat} 號主模型暫不可用，已使用事先指定的免費候選模型 ${backup.provider}/${backup.model}。`;
+  }
  }else if(anyCloudConfigured()){
   // Mixed-mode fail closed: no silent offline fallback for a misconfigured NPC.
   throw Error(`AI_PROVIDER_NOT_CONFIGURED: ${seat} 號 NPC 的 ${config.keyName} 尚未設定。`);

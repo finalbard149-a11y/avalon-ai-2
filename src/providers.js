@@ -1,6 +1,6 @@
 // All provider calls are per-seat and receive only an authorized perspective.
 // Never send complete game state, other NPC memories, or identity assignments.
-const NPC_SEATS = Object.freeze([1,2,4,5,6,7]);
+import {NPC_SEATS,selectedRoute,sixModelEnabled} from './routing25.js';
 const PROVIDERS = new Set(['gemini','groq','openrouter']);
 const DEFAULT_MODELS = {gemini:'gemini-3.5-flash-lite',groq:'openai/gpt-oss-20b',openrouter:'openai/gpt-oss-20b:free'};
 const SCHEMA={
@@ -11,20 +11,33 @@ const SCHEMA={
  ASSASSINATE:{type:'OBJECT',properties:{ranking:{type:'ARRAY',items:{type:'OBJECT',properties:{seat:{type:'INTEGER'},score:{type:'NUMBER'},support:{type:'ARRAY',items:{type:'STRING'}},against:{type:'ARRAY',items:{type:'STRING'}}},required:['seat','score','support','against']}},target:{type:'INTEGER'}},required:['ranking','target']}
 };
 const URLS = {groq:'https://api.groq.com/openai/v1/chat/completions',openrouter:'https://openrouter.ai/api/v1/chat/completions'};
-export function seatConfig(seat){
+export function validateRoute(route,seat){
  if(!NPC_SEATS.includes(seat))throw Error('Not an NPC seat');
- const provider=(process.env[`AVALON_NPC_${seat}_PROVIDER`]||'gemini').toLowerCase();
+ const provider=route.provider;
  if(!PROVIDERS.has(provider))throw Error(`NPC ${seat}: invalid provider`);
- const model=process.env[`AVALON_NPC_${seat}_MODEL`]|| (provider==='gemini'?process.env.GEMINI_MODEL:undefined) ||DEFAULT_MODELS[provider];
+ const model=route.model||DEFAULT_MODELS[provider];
  if(!/^[\w.\-/:]{3,100}$/.test(model))throw Error(`NPC ${seat}: invalid model identifier`);
+ if(provider==='groq'&&!new Set(['openai/gpt-oss-20b','openai/gpt-oss-120b','llama-3.3-70b-versatile','llama-3.1-8b-instant','qwen/qwen3.8-27b']).has(model))throw Error(`NPC ${seat}: Groq model is not on the free-tier allowlist`);
  if(provider==='openrouter'&&!model.endsWith(':free'))throw Error(`NPC ${seat}: only OpenRouter :free models are allowed`);
  const keyName={gemini:'GEMINI_API_KEY',groq:'GROQ_API_KEY',openrouter:'OPENROUTER_API_KEY'}[provider];
  return {provider,model,configured:Boolean(process.env[keyName]),keyName};
 }
+export function seatConfig(seat){return validateRoute(selectedRoute(seat),seat);}
+export function fallbackConfig(seat){
+ const raw=process.env[`AVALON_NPC_${seat}_FALLBACK`];
+ if(!raw)return null;
+ const [provider,model,...rest]=raw.split("|");
+ if(rest.length||!provider||!model)throw Error(`NPC ${seat}: FALLBACK must be provider|model`);
+ const fallback=validateRoute({provider:provider.toLowerCase(),model},seat);
+ if(!fallback.configured)throw Error(`AI_PROVIDER_NOT_CONFIGURED: ${seat} 號備援缺少 ${fallback.keyName}`);
+ return fallback;
+}
 export function routingStatus(){return NPC_SEATS.map(seat=>({seat,...((({provider,model,configured})=>({provider,model,configured}))(seatConfig(seat)))}));}
+export function routingMode(){return sixModelEnabled()?'six-model':'legacy';}
+export function rosterReady(){return routingStatus().every(x=>x.configured);}
 export function anyCloudConfigured(){return routingStatus().some(x=>x.configured);}
-export function requestSpec({seat,action,instructions,view}){
- const config=seatConfig(seat);
+export function requestSpec({seat,action,instructions,view,routeOverride=null}){
+ const config=routeOverride?validateRoute(routeOverride,seat):seatConfig(seat);
  if(!config.configured)throw Error(`AI_PROVIDER_NOT_CONFIGURED: ${seat} 號 NPC 缺少 ${config.keyName}，請到 Railway 設定；不會默默改用其他模型。`);
  const {provider,model,keyName}=config;
  if(provider==='gemini'){
