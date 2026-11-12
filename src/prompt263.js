@@ -23,6 +23,7 @@ export function compactPrompt(g,seat,action){
    'Never confuse logically proven identities with suspicion; private role knowledge must remain secret.',
    'Evil may bluff intentionally, but must remember its own earlier public claims.'
   ]},
+  ownStrategyPlan:p.memory?.strategy27?.current?{intent:p.memory.strategy27.current.intent,reasons:p.memory.strategy27.current.reasons,publicClaims:p.memory.strategy27.current.publicClaims,source:p.memory.strategy27.current.source}:null,
   accountability:context,
   rulesContext:safePromptRules(g,seat)
  };

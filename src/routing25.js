@@ -13,5 +13,9 @@ export function sixModelEnabled(){return process.env.AVALON_SIX_MODEL_MODE==='1'
 export function selectedRoute(seat){
  if(!NPC_SEATS.includes(seat))throw Error('Not an NPC seat');
  const planned=sixModelEnabled()?ROSTER_25[seat]:{provider:'gemini',model:process.env.GEMINI_MODEL||'gemini-3.5-flash-lite'};
- return {provider:(process.env[`AVALON_NPC_${seat}_PROVIDER`]||planned.provider).toLowerCase(),model:process.env[`AVALON_NPC_${seat}_MODEL`]||planned.model};
+ // Optional shared brain, but never a shared memory/context. Explicit per-seat overrides win.
+ const sharedProvider=process.env.AVALON_SHARED_PROVIDER?.trim();
+ const sharedModel=process.env.AVALON_SHARED_MODEL?.trim();
+ if(Boolean(sharedProvider)!==Boolean(sharedModel))throw Error('AVALON_SHARED_PROVIDER and AVALON_SHARED_MODEL must be configured together');
+ return {provider:(process.env[`AVALON_NPC_${seat}_PROVIDER`]||sharedProvider||planned.provider).toLowerCase(),model:process.env[`AVALON_NPC_${seat}_MODEL`]||sharedModel||planned.model};
 }

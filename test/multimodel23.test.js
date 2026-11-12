@@ -35,5 +35,5 @@ test('no arbitrary provider URL environment can be configured',()=>{
 test('UI explains reply backlog and shows provider assignment',()=>{
  assert.match(frontend,/NPC 模型配置/);
  assert.match(frontend,/聽取 \/ 重試 NPC 回應/);
- assert.match(frontend,/2\.[3456]/);
+ assert.match(frontend,/2\.[34567]/);
 });

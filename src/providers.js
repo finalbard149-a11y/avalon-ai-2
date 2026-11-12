@@ -5,7 +5,7 @@ import {promptFootprint} from './prompt263.js';
 const PROVIDERS = new Set(['gemini','groq','openrouter','cloudflare']);
 const DEFAULT_MODELS = {gemini:'gemini-3.5-flash-lite',groq:'openai/gpt-oss-20b',openrouter:'openai/gpt-oss-20b:free',cloudflare:'@cf/zai-org/glm-4.7-flash'};
 const SCHEMA={
- SPEAK:{type:'OBJECT',properties:{text:{type:'STRING'},beliefUpdate:{type:'OBJECT',properties:{note:{type:'STRING'},stances:{type:'ARRAY',items:{type:'OBJECT',properties:{seat:{type:'INTEGER'},score:{type:'NUMBER'}},required:['seat','score']}}},required:['note']}},required:['text','beliefUpdate']},
+ SPEAK:{type:'OBJECT',properties:{text:{type:'STRING'},beliefUpdate:{type:'OBJECT',properties:{note:{type:'STRING'},stances:{type:'ARRAY',items:{type:'OBJECT',properties:{seat:{type:'INTEGER'},score:{type:'NUMBER'}},required:['seat','score']}}},required:['note']},strategyPlan:{type:'OBJECT',properties:{intent:{type:'STRING',enum:['SUPPORT','OPPOSE','UNDECIDED']},reasons:{type:'ARRAY',items:{type:'STRING'}},publicClaims:{type:'ARRAY',items:{type:'STRING'}},uncertainties:{type:'ARRAY',items:{type:'STRING'}}},required:['intent','reasons']}},required:['text','beliefUpdate']},
  PROPOSE:{type:'OBJECT',properties:{team:{type:'ARRAY',items:{type:'INTEGER'}},reason:{type:'STRING'}},required:['team']},
  VOTE:{type:'OBJECT',properties:{approve:{type:'BOOLEAN'}},required:['approve']},
  MISSION:{type:'OBJECT',properties:{fail:{type:'BOOLEAN'}},required:['fail']},
@@ -35,7 +35,7 @@ export function fallbackConfig(seat){
  return fallback;
 }
 export function routingStatus(){return NPC_SEATS.map(seat=>({seat,...((({provider,model,configured})=>({provider,model,configured}))(seatConfig(seat)))}));}
-export function routingMode(){return sixModelEnabled()?'six-model':'legacy';}
+export function routingMode(){return process.env.AVALON_SHARED_PROVIDER&&process.env.AVALON_SHARED_MODEL?'shared-brain-2.7':(sixModelEnabled()?'six-model':'legacy');}
 export function rosterReady(){return routingStatus().every(x=>x.configured);}
 export function anyCloudConfigured(){return routingStatus().some(x=>x.configured);}
 export function requestSpec({seat,action,instructions,view,routeOverride=null}){

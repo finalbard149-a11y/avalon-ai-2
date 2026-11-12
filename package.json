@@ -1,6 +1,6 @@
 {
   "name": "avalon-ai-2-six-model",
-  "version": "2.6.3-safe-proposal.3",
+  "version": "2.7.0-beta.1",
   "type": "module",
   "private": true,
   "engines": {
@@ -9,7 +9,9 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check src/server.js && node --check src/agents.js && node --check src/providers.js && node --check src/store.js && node --check src/quota.js && node --check src/strategy.js && node --check src/routing25.js && node --check src/memory26.js && node --check src/reasoning262.js && node --check src/deduction263.js && node --check src/prompt263.js && node --check src/proposalGuard263.js && node --check src/actionPrompt263.js"
+    "check": "node --check src/server.js && node --check src/agents.js && node --check src/providers.js && node --check src/store.js && node --check src/quota.js && node --check src/strategy.js && node --check src/routing25.js && node --check src/memory26.js && node --check src/reasoning262.js && node --check src/deduction263.js && node --check src/prompt263.js && node --check src/proposalGuard263.js && node --check src/actionPrompt263.js && node --check src/strategy27.js && node --check src/agents.js && node --check src/modelComparison27.js && node --check scripts/compare27.mjs",
+    "benchmark": "node scripts/benchmark27.mjs",
+    "compare": "node scripts/compare27.mjs"
   },
   "dependencies": {
     "pg": "^8.13.3"

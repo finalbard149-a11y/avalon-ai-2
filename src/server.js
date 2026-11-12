@@ -9,6 +9,7 @@ import {routingStatus,routingMode} from './providers.js';
 import {rememberPrivateMission,rememberProposalReason,rememberVoteReason} from './memory26.js';
 import {publicLogic,voteDecisionReason} from './strategy.js';
 import {inspectProposal,safeProposalFallback} from './proposalGuard263.js';
+import {commitStrategyPlan} from './strategy27.js';
 import {initializeStore,getGame,getGameUsage,getProviderCooldowns,saveNewGame,mutateGame} from './store.js';
 import {authorized,checkConfig,checkPassword,sessionCookie,clearCookie} from './auth.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
@@ -20,7 +21,15 @@ async function aiAction(g,seat,action){
  g.aiCallCount=await getGameUsage(g.id);
  const d=await decide(g,seat,action);
  try{
-  if(action==='SPEAK')speak(g,seat,String(d.text||'我還需要更多資訊。').slice(0,120));
+  if(action==='SPEAK'){
+   speak(g,seat,String(d.text||'我還需要更多資訊。').slice(0,120));
+   if(d.strategyPlan){
+    try {
+     const plan=commitStrategyPlan(g,seat,d.strategyPlan);
+     g.audit??=[];g.audit.push({seat,action:'STRATEGY_COMMITMENT_27',intent:plan.intent,eventSeq:g.revision,time:new Date().toISOString()});
+    }catch(e){g.audit??=[];g.audit.push({seat,action:'STRATEGY_PLAN_REJECTED_27',code:String(e.message).slice(0,100),eventSeq:g.revision});}
+   }
+  }
   else if(action==='PROPOSE'){
    const check=inspectProposal(g,seat,d.team);
    let selected=d,origin=typeof d.reason==='string'?'AI_DECISION':'UNRECORDED';
@@ -36,7 +45,10 @@ async function aiAction(g,seat,action){
    rememberProposalReason(g,seat,selected.team,selected.reason,origin);
    queueSpeakers(g,'PROPOSAL');
   }
-  else if(action==='VOTE'){rememberVoteReason(g,seat,voteDecisionReason(g,seat,d.approve));vote(g,seat,d.approve);}
+  else if(action==='VOTE'){
+   const record=d.decisionOrigin==='MODEL_COMMITMENT_27'?{round:g.round,attempt:g.attempt,team:[...g.team],approve:d.approve,code:'MODEL_COMMITMENT_27',reason:(d.modelReasons||[]).join('；').slice(0,300),source:'MODEL_REASON_AT_SPEECH_TIME',eventSeq:g.revision}:voteDecisionReason(g,seat,d.approve);
+   rememberVoteReason(g,seat,record);vote(g,seat,d.approve);
+  }
   else if(action==='MISSION'){const fail=EVIL.has(g.roles[seat])&&d.fail===true;rememberPrivateMission(g,seat,fail);mission(g,seat,fail);}
   else if(action==='ASSASSINATE'){
    const eligible=[1,2,3,4,5,6,7].filter(s=>validCandidate(g,seat,s));

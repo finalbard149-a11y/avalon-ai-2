@@ -56,12 +56,12 @@ test('provider token usage logged only when returned, without logging prompt',as
   assert.ok(!logs.join(' ').includes('PRIVATE_ROLE_DATA'));
  }finally{console.info=orig;}
 });
-test('visible page version and package version both reflect 2.6.3',()=>{
+test('visible page version and package version both reflect 2.7',()=>{
  const html=readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const pkg=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
- assert.match(pkg.version,/^2\.6\.3/);
- assert.match(html,/Fair Play Engine 2\.6\.3/);
- assert.match(html,/<title>Avalon AI 2\.6\.3/);
+ assert.match(pkg.version,/^2\.7/);
+ assert.match(html,/Fair Play Engine 2\.7/);
+ assert.match(html,/<title>Avalon AI 2\.7/);
  assert.ok(!html.includes('Fair Play Engine 2.6.1'));
 });
 test('cooldown UI reads provider status and renders provider-specific expiry',()=>{

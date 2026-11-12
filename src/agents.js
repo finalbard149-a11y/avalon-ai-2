@@ -8,6 +8,7 @@ import {accountabilityContext,validateSpeech} from './reasoning262.js';
 import {setProviderCooldown} from './store.js';
 import {compactPrompt,promptFootprint} from './prompt263.js';
 import {actionInstructions,actionOutputContract} from './actionPrompt263.js';
+import {ballotFromCommittedPlan} from './strategy27.js';
 const seats=[1,2,3,4,5,6,7];
 export const cloudEnabled=anyCloudConfigured;
 export function offline(g,seat,action){
@@ -28,8 +29,16 @@ export function sanitizedRequest(g,seat,action){
 export async function decide(g,seat,action){
  // Voting and mission cards are independent private decisions, not model calls.
  if(action==='VOTE'||action==='MISSION'){
-  const output=zeroCostDecision(g,seat,action);
-  g.audit??=[];g.audit.push({seat,action,source:'private-strategy-2.4',inputHash:auditHash(perspective(g,seat)),outputHash:auditHash(output),output,time:new Date().toISOString(),eventSeq:g.revision});
+  let output=zeroCostDecision(g,seat,action);
+  if(action==='VOTE'){
+   const plan=ballotFromCommittedPlan(g,seat);
+   const k=knowledge(g,seat);
+   const unsafeGood=k.role==='MERLIN'&&g.team.some(s=>k.visibleEvil.includes(s));
+   if(plan.decided&&g.attempt!==5&&!unsafeGood){
+    output={approve:plan.approve,decisionOrigin:'MODEL_COMMITMENT_27',modelReasons:plan.rationale,eventKey:plan.eventKey};
+   }
+  }
+  g.audit??=[];g.audit.push({seat,action,source:output.decisionOrigin||'private-strategy-2.4',inputHash:auditHash(perspective(g,seat)),outputHash:auditHash(output),output,time:new Date().toISOString(),eventSeq:g.revision});
   return output;
  }
  const perspectiveInput=sanitizedRequest(g,seat,action);

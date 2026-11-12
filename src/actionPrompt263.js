@@ -11,8 +11,8 @@ const shared=[
 ].join('\n');
 const formats={
  SPEAK: {
-  schema:'{"text":"繁體中文自然發言（1至3句）","beliefUpdate":{"note":"簡短的個人判斷更新","stances":[{"seat":2,"score":-1}]}}',
-  notes:'目前只能進行公開發言，不是在組隊。text 為必填。beliefUpdate.note 為必填，stances 可省略；score 限 -2 到 2。先回答最近一個問題；若被追問，先承認自己實際說過的原話，再解釋或撤回，不得捏造過去的動機。'
+  schema:'{"text":"繁體中文自然發言（1至3句）","beliefUpdate":{"note":"簡短的個人判斷更新","stances":[{"seat":2,"score":-1}]},"strategyPlan":{"intent":"UNDECIDED","reasons":["當下判斷理由"],"publicClaims":[],"uncertainties":[]}}',
+  notes:'目前只能進行公開發言，不是在組隊。text 為必填。beliefUpdate.note 為必填，stances、strategyPlan 可省略；score 限 -2 到 2。如果當前已有提案且你有投票立場，strategyPlan.intent 可為 SUPPORT 或 OPPOSE，理由必須基於此刻可知資訊；無把握則 UNDECIDED。這是私人策略，不必公開；不得使用固定台詞。先回答最近一個問題；若被追問，先承認自己實際說過的原話，再解釋或撤回，不得捏造過去的動機。'
  },
  PROPOSE: {
   schema:null,
