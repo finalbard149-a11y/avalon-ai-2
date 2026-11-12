@@ -4,7 +4,7 @@ const NPC_SEATS = Object.freeze([1,2,4,5,6,7]);
 const PROVIDERS = new Set(['gemini','groq','openrouter']);
 const DEFAULT_MODELS = {gemini:'gemini-3.5-flash-lite',groq:'openai/gpt-oss-20b',openrouter:'openai/gpt-oss-20b:free'};
 const SCHEMA={
- SPEAK:{type:'OBJECT',properties:{text:{type:'STRING'},beliefUpdate:{type:'OBJECT',properties:{note:{type:'STRING'}},required:['note']}},required:['text','beliefUpdate']},
+ SPEAK:{type:'OBJECT',properties:{text:{type:'STRING'},beliefUpdate:{type:'OBJECT',properties:{note:{type:'STRING'},stances:{type:'ARRAY',items:{type:'OBJECT',properties:{seat:{type:'INTEGER'},score:{type:'NUMBER'}},required:['seat','score']}}},required:['note']}},required:['text','beliefUpdate']},
  PROPOSE:{type:'OBJECT',properties:{team:{type:'ARRAY',items:{type:'INTEGER'}}},required:['team']},
  VOTE:{type:'OBJECT',properties:{approve:{type:'BOOLEAN'}},required:['approve']},
  MISSION:{type:'OBJECT',properties:{fail:{type:'BOOLEAN'}},required:['fail']},
