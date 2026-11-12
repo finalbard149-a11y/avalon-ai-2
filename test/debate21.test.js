@@ -42,7 +42,8 @@ test('assassin model request independent of hidden Merlin seat',()=>{
 });
 
 test('human speak action triggers independent NPC replies without auto advancing',()=>{
- assert.match(server,/if\(p\.type==='SPEAK'\)\{speak\(g,HUMAN,p\.text\);await respondToHuman\(g,p\.text\);return;\}/);
- assert.match(server,/await aiAction\(g,lead,'SPEAK'\)/);
+ assert.match(server,/u.pathname==='\/api\/speak'/);
+ assert.match(server,/u.pathname==='\/api\/respond'/);
+ assert.match(server,/game.replyQueue.shift\(\)/);
  assert.match(server,/g\.review&&p\.type!=='SPEAK'/);
 });

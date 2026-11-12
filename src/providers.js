@@ -1,0 +1,70 @@
+// All provider calls are per-seat and receive only an authorized perspective.
+// Never send complete game state, other NPC memories, or identity assignments.
+const NPC_SEATS = Object.freeze([1,2,4,5,6,7]);
+const PROVIDERS = new Set(['gemini','groq','openrouter']);
+const DEFAULT_MODELS = {gemini:'gemini-3.5-flash-lite',groq:'openai/gpt-oss-20b',openrouter:'openai/gpt-oss-20b:free'};
+const SCHEMA={
+ SPEAK:{type:'OBJECT',properties:{text:{type:'STRING'},beliefUpdate:{type:'OBJECT',properties:{note:{type:'STRING'}},required:['note']}},required:['text','beliefUpdate']},
+ PROPOSE:{type:'OBJECT',properties:{team:{type:'ARRAY',items:{type:'INTEGER'}}},required:['team']},
+ VOTE:{type:'OBJECT',properties:{approve:{type:'BOOLEAN'}},required:['approve']},
+ MISSION:{type:'OBJECT',properties:{fail:{type:'BOOLEAN'}},required:['fail']},
+ ASSASSINATE:{type:'OBJECT',properties:{ranking:{type:'ARRAY',items:{type:'OBJECT',properties:{seat:{type:'INTEGER'},score:{type:'NUMBER'},support:{type:'ARRAY',items:{type:'STRING'}},against:{type:'ARRAY',items:{type:'STRING'}}},required:['seat','score','support','against']}},target:{type:'INTEGER'}},required:['ranking','target']}
+};
+const URLS = {groq:'https://api.groq.com/openai/v1/chat/completions',openrouter:'https://openrouter.ai/api/v1/chat/completions'};
+export function seatConfig(seat){
+ if(!NPC_SEATS.includes(seat))throw Error('Not an NPC seat');
+ const provider=(process.env[`AVALON_NPC_${seat}_PROVIDER`]||'gemini').toLowerCase();
+ if(!PROVIDERS.has(provider))throw Error(`NPC ${seat}: invalid provider`);
+ const model=process.env[`AVALON_NPC_${seat}_MODEL`]|| (provider==='gemini'?process.env.GEMINI_MODEL:undefined) ||DEFAULT_MODELS[provider];
+ if(!/^[\w.\-/:]{3,100}$/.test(model))throw Error(`NPC ${seat}: invalid model identifier`);
+ if(provider==='openrouter'&&!model.endsWith(':free'))throw Error(`NPC ${seat}: only OpenRouter :free models are allowed`);
+ const keyName={gemini:'GEMINI_API_KEY',groq:'GROQ_API_KEY',openrouter:'OPENROUTER_API_KEY'}[provider];
+ return {provider,model,configured:Boolean(process.env[keyName]),keyName};
+}
+export function routingStatus(){return NPC_SEATS.map(seat=>({seat,...((({provider,model,configured})=>({provider,model,configured}))(seatConfig(seat)))}));}
+export function anyCloudConfigured(){return routingStatus().some(x=>x.configured);}
+export function requestSpec({seat,action,instructions,view}){
+ const config=seatConfig(seat);
+ if(!config.configured)throw Error(`AI_PROVIDER_NOT_CONFIGURED: ${seat} 號 NPC 缺少 ${config.keyName}，請到 Railway 設定；不會默默改用其他模型。`);
+ const {provider,model,keyName}=config;
+ if(provider==='gemini'){
+  const generationConfig={responseMimeType:'application/json',responseSchema:SCHEMA[action],maxOutputTokens:action==='ASSASSINATE'?3000:1800};
+  // Gemini thinking output may consume token budget. Do not force unsupported settings.
+  if(model.startsWith('gemini-2.5'))generationConfig.thinkingConfig={thinkingBudget:0};
+  return {provider,model,url:`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+   headers:{'Content-Type':'application/json','x-goog-api-key':process.env[keyName]},
+   body:{systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(view)}]}],generationConfig}};
+ }
+ return {provider,model,url:URLS[provider],headers:{'Content-Type':'application/json','Authorization':`Bearer ${process.env[keyName]}`},
+  body:{model,messages:[{role:'system',content:instructions},{role:'user',content:JSON.stringify(view)}],response_format:{type:'json_object'},temperature:action==='SPEAK'?0.65:0.2,max_tokens:action==='ASSASSINATE'?3000:1600}};
+}
+export function extractOutput(provider,raw){
+ let content;
+ if(provider==='gemini'){
+  const reason=raw?.candidates?.[0]?.finishReason;
+  content=raw?.candidates?.[0]?.content?.parts?.filter(x=>typeof x.text==='string').map(x=>x.text).join('');
+  if(!content)throw Error(`AI_EMPTY_RESPONSE: Gemini 沒有輸出文字（${reason||'無結束原因'}）。`);
+ }else{
+  content=raw?.choices?.[0]?.message?.content;
+  if(typeof content!=='string'||!content)throw Error('AI_EMPTY_RESPONSE: 模型沒有輸出文字。');
+ }
+ try{
+  const obj=JSON.parse(content.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));
+  if(!obj||Array.isArray(obj)||typeof obj!=='object')throw Error('not object');
+  return obj;
+ }catch{throw Error('AI_INVALID_JSON: 模型回傳的 JSON 格式無效，已保留玩家操作，可重試；沒有改用付費模型。');}
+}
+export async function callProvider(spec,fetchImpl=fetch){
+ let response;
+ try{response=await fetchImpl(spec.url,{method:'POST',headers:spec.headers,body:JSON.stringify(spec.body),signal:AbortSignal.timeout(40000)});}
+ catch(e){throw Error(`AI_NETWORK_ERROR: ${e.name==='TimeoutError'?'模型呼叫逾時':'無法連線到供應商'}；沒有切換模型。`);}
+ if(!response.ok){
+  const status=response.status;
+  if(status===429)throw Error('AI_QUOTA: 供應商免費額度或頻率已達限制。');
+  if(status===401||status===403)throw Error('AI_AUTH: API Key 或模型權限有問題。');
+  if(status===404)throw Error('AI_MODEL_NOT_FOUND: 目前設定的模型無法使用，請核對供應商模型清單。');
+  throw Error(`AI_HTTP_${status}: 模型請求失敗；不會改用付費模型。`);
+ }
+ const data=await response.json().catch(()=>{throw Error('AI_INVALID_HTTP_JSON: 供應商回應無效。');});
+ return extractOutput(spec.provider,data);
+}

@@ -3,6 +3,7 @@ const {Pool}=pg;
 let pool;
 let local = null;
 const localDaily=new Map();
+const localGameCalls=new Map();
 export async function initializeStore(){
  if(process.env.DATABASE_URL){
   pool=new Pool({connectionString:process.env.DATABASE_URL, max:4, ssl:process.env.DB_SSL==='require'?{rejectUnauthorized:true}:undefined});
@@ -11,6 +12,9 @@ export async function initializeStore(){
   )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS avalon_ai_daily_quota (
     day DATE PRIMARY KEY, used INTEGER NOT NULL CHECK (used >= 0)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS avalon_ai_game_quota (
+    game_id UUID PRIMARY KEY, used INTEGER NOT NULL CHECK (used >= 0)
   )`);
  }else if(process.env.NODE_ENV==='production'){
   throw Error('DATABASE_URL is mandatory in production');
@@ -57,4 +61,18 @@ export async function reserveDailyCall(limit){
   RETURNING used
  `,[day,limit]);
  return rows.length===1;
+}
+
+// Durable per-game reservation, including attempts rolled back by a failed NPC response.
+export async function reserveGameCall(gameId,limit){
+ if(!pool){const n=localGameCalls.get(gameId)||0;if(n>=limit)return null;localGameCalls.set(gameId,n+1);return n+1;}
+ const {rows}=await pool.query(`INSERT INTO avalon_ai_game_quota(game_id,used) VALUES($1,1)
+ ON CONFLICT(game_id) DO UPDATE SET used=avalon_ai_game_quota.used+1
+ WHERE avalon_ai_game_quota.used < $2 RETURNING used`,[gameId,limit]);
+ return rows[0]?.used??null;
+}
+export async function getGameUsage(gameId){
+ if(!pool)return localGameCalls.get(gameId)||0;
+ const {rows}=await pool.query('SELECT used FROM avalon_ai_game_quota WHERE game_id=$1',[gameId]);
+ return rows[0]?.used||0;
 }
