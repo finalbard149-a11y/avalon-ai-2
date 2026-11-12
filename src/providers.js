@@ -5,7 +5,7 @@ const PROVIDERS = new Set(['gemini','groq','openrouter','cloudflare']);
 const DEFAULT_MODELS = {gemini:'gemini-3.5-flash-lite',groq:'openai/gpt-oss-20b',openrouter:'openai/gpt-oss-20b:free',cloudflare:'@cf/zai-org/glm-4.7-flash'};
 const SCHEMA={
  SPEAK:{type:'OBJECT',properties:{text:{type:'STRING'},beliefUpdate:{type:'OBJECT',properties:{note:{type:'STRING'},stances:{type:'ARRAY',items:{type:'OBJECT',properties:{seat:{type:'INTEGER'},score:{type:'NUMBER'}},required:['seat','score']}}},required:['note']}},required:['text','beliefUpdate']},
- PROPOSE:{type:'OBJECT',properties:{team:{type:'ARRAY',items:{type:'INTEGER'}}},required:['team']},
+ PROPOSE:{type:'OBJECT',properties:{team:{type:'ARRAY',items:{type:'INTEGER'}},reason:{type:'STRING'}},required:['team']},
  VOTE:{type:'OBJECT',properties:{approve:{type:'BOOLEAN'}},required:['approve']},
  MISSION:{type:'OBJECT',properties:{fail:{type:'BOOLEAN'}},required:['fail']},
  ASSASSINATE:{type:'OBJECT',properties:{ranking:{type:'ARRAY',items:{type:'OBJECT',properties:{seat:{type:'INTEGER'},score:{type:'NUMBER'},support:{type:'ARRAY',items:{type:'STRING'}},against:{type:'ARRAY',items:{type:'STRING'}}},required:['seat','score','support','against']}},target:{type:'INTEGER'}},required:['ranking','target']}
@@ -75,7 +75,7 @@ export async function callProvider(spec,fetchImpl=fetch){
  catch(e){throw Error(`AI_NETWORK_ERROR: ${e.name==='TimeoutError'?'模型呼叫逾時':'無法連線到供應商'}；沒有切換模型。`);}
  if(!response.ok){
   const status=response.status;
-  if(status===429)throw Error(`AI_QUOTA: ${spec.provider} 供應商免費額度或頻率已達限制。`);
+  if(status===429){const err=new Error(`AI_QUOTA: ${spec.provider} 供應商免費額度或頻率已達限制。`);err.code='AI_QUOTA';const h=response.headers?.get?.('retry-after');const sec=h&&/^\d+$/.test(h)?Number(h):h&&Number.isFinite(Date.parse(h))?Math.ceil((Date.parse(h)-Date.now())/1000):60;err.retryAfterSeconds=Math.max(15,Math.min(3600,sec||60));throw err;}
   if(status===401||status===403)throw Error('AI_AUTH: API Key 或模型權限有問題。');
   if(status===404)throw Error('AI_MODEL_NOT_FOUND: 目前設定的模型無法使用，請核對供應商模型清單。');
   throw Error(`AI_HTTP_${status}: 模型請求失敗；不會改用付費模型。`);

@@ -1,6 +1,6 @@
 {
   "name": "avalon-ai-2-six-model",
-  "version": "2.5.1-beta.1",
+  "version": "2.6.0-beta.1",
   "type": "module",
   "private": true,
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check src/server.js && node --check src/agents.js && node --check src/providers.js && node --check src/store.js && node --check src/quota.js && node --check src/strategy.js && node --check src/routing25.js"
+    "check": "node --check src/server.js && node --check src/agents.js && node --check src/providers.js && node --check src/store.js && node --check src/quota.js && node --check src/strategy.js && node --check src/routing25.js && node --check src/memory26.js"
   },
   "dependencies": {
     "pg": "^8.13.3"

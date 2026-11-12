@@ -6,8 +6,9 @@ import {createGame,publicState,knowledge,speak,propose,vote,mission,assassinate,
 import {decide,cloudEnabled} from './agents.js';
 import {DAILY_LIMIT,GAME_LIMIT} from './quota.js';
 import {routingStatus,routingMode} from './providers.js';
+import {rememberPrivateMission,rememberProposalReason} from './memory26.js';
 import {publicLogic} from './strategy.js';
-import {initializeStore,getGame,getGameUsage,saveNewGame,mutateGame} from './store.js';
+import {initializeStore,getGame,getGameUsage,getProviderCooldowns,saveNewGame,mutateGame} from './store.js';
 import {authorized,checkConfig,checkPassword,sessionCookie,clearCookie} from './auth.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
 const HUMAN=3,PORT=Number(process.env.PORT||3000);
@@ -19,9 +20,9 @@ async function aiAction(g,seat,action){
  const d=await decide(g,seat,action);
  try{
   if(action==='SPEAK')speak(g,seat,String(d.text||'我還需要更多資訊。').slice(0,120));
-  else if(action==='PROPOSE'){propose(g,seat,d.team);queueSpeakers(g,'PROPOSAL');}
+  else if(action==='PROPOSE'){propose(g,seat,d.team);rememberProposalReason(g,seat,d.team,d.reason,typeof d.reason==='string'?'AI_DECISION':'UNRECORDED');queueSpeakers(g,'PROPOSAL');}
   else if(action==='VOTE')vote(g,seat,d.approve);
-  else if(action==='MISSION')mission(g,seat,EVIL.has(g.roles[seat])&&d.fail===true);
+  else if(action==='MISSION'){const fail=EVIL.has(g.roles[seat])&&d.fail===true;rememberPrivateMission(g,seat,fail);mission(g,seat,fail);}
   else if(action==='ASSASSINATE'){
    const eligible=[1,2,3,4,5,6,7].filter(s=>validCandidate(g,seat,s));
    const ranking=Array.isArray(d.ranking)?d.ranking:[];
@@ -111,6 +112,7 @@ const server=http.createServer(async(req,res)=>{
   if(!authorized(req))return json(res,401,{error:'login required'});
   if(req.method==='POST'&&u.pathname==='/api/logout')return json(res,200,{ok:true},{'Set-Cookie':clearCookie()});
   if(req.method==='GET'&&u.pathname==='/api/state'){const g=await getGame();if(g)g.aiCallCount=await getGameUsage(g.id);return json(res,200,g?humanView(g):{noGame:true});}
+  if(req.method==='GET'&&u.pathname==='/api/provider-status')return json(res,200,{cooldowns:await getProviderCooldowns(),routing:routingStatus()});
   if(req.method==='GET'&&u.pathname==='/api/audit'){
    const g=await getGame();if(!g||g.phase!=='ENDED')return json(res,403,{error:'audit available after game'});
    return json(res,200,{audit:g.audit||[],npcMemory:g.npcMemory});
@@ -188,4 +190,4 @@ const server=http.createServer(async(req,res)=>{
   return json(res,404,{error:'not found'});
  }catch(err){console.error('request error:',err.message);return json(res,400,{error:String(err.message||err)});}
 });
-checkConfig();await initializeStore();server.listen(PORT,'0.0.0.0',()=>console.log(`Avalon AI 2.5 listening on ${PORT}`));
+checkConfig();await initializeStore();server.listen(PORT,'0.0.0.0',()=>console.log(`Avalon AI 2.6 listening on ${PORT}`));

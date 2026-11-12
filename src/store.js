@@ -4,6 +4,7 @@ let pool;
 let local = null;
 const localDaily=new Map();
 const localGameCalls=new Map();
+const localCooldown=new Map();
 export async function initializeStore(){
  if(process.env.DATABASE_URL){
   pool=new Pool({connectionString:process.env.DATABASE_URL, max:4, ssl:process.env.DB_SSL==='require'?{rejectUnauthorized:true}:undefined});
@@ -16,6 +17,7 @@ export async function initializeStore(){
   await pool.query(`CREATE TABLE IF NOT EXISTS avalon_ai_game_quota (
     game_id UUID PRIMARY KEY, used INTEGER NOT NULL CHECK (used >= 0)
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS avalon_ai_provider_cooldown (provider TEXT PRIMARY KEY, until_at TIMESTAMPTZ NOT NULL)`);
   await pool.query(`CREATE TABLE IF NOT EXISTS avalon_ai_seat_quota (game_id UUID NOT NULL, seat INTEGER NOT NULL, used INTEGER NOT NULL CHECK (used>=0), PRIMARY KEY(game_id,seat))`);
   await pool.query(`CREATE TABLE IF NOT EXISTS avalon_ai_provider_daily_quota (day DATE NOT NULL,provider TEXT NOT NULL,used INTEGER NOT NULL CHECK (used>=0),PRIMARY KEY(day,provider))`);
  }else if(process.env.NODE_ENV==='production'){
@@ -86,8 +88,9 @@ const localProviderUsage=new Map(),localSeatUsage=new Map();
 export async function reserveScopedCall(gameId,seat,provider,limits){
  const day=new Date().toISOString().slice(0,10);
  const sk=`${gameId}:${seat}`,pk=`${day}:${provider}`;
- const errors={game:'本局模型請求額度已滿',daily:'全站今日模型請求額度已滿',seat:`${seat} 號 NPC 個人額度已滿`,provider:`${provider} 今日保護額度已滿`};
+ const errors={cooldown:`${provider} 正在短暫冷卻，請稍後再試`,game:'本局模型請求額度已滿',daily:'全站今日模型請求額度已滿',seat:`${seat} 號 NPC 個人額度已滿`,provider:`${provider} 今日保護額度已滿`};
  if(!pool){
+  if((localCooldown.get(provider)||0)>Date.now())return {ok:false,reason:errors.cooldown};
   const counts={game:localGameCalls.get(gameId)||0,daily:localDaily.get(day)||0,seat:localSeatUsage.get(sk)||0,provider:localProviderUsage.get(pk)||0};
   for(const key of ['game','daily','seat','provider'])if(counts[key]>=limits[key+'Limit'])return {ok:false,reason:errors[key]};
   localGameCalls.set(gameId,counts.game+1);localDaily.set(day,counts.daily+1);localSeatUsage.set(sk,counts.seat+1);localProviderUsage.set(pk,counts.provider+1);
@@ -97,6 +100,8 @@ export async function reserveScopedCall(gameId,seat,provider,limits){
  try{
   await client.query('BEGIN');
   await client.query('SELECT pg_advisory_xact_lock(25110001)');
+  const cd=await client.query('SELECT until_at FROM avalon_ai_provider_cooldown WHERE provider=$1',[provider]);
+  if(cd.rows[0] && new Date(cd.rows[0].until_at).getTime()>Date.now()){await client.query('ROLLBACK');return {ok:false,reason:errors.cooldown};}
   const [gameResult,dailyResult,seatResult,providerResult]=await Promise.all([
    client.query('SELECT used FROM avalon_ai_game_quota WHERE game_id=$1',[gameId]),
    client.query('SELECT used FROM avalon_ai_daily_quota WHERE day=$1',[day]),
@@ -111,4 +116,17 @@ export async function reserveScopedCall(gameId,seat,provider,limits){
   await client.query('INSERT INTO avalon_ai_provider_daily_quota(day,provider,used) VALUES ($1,$2,1) ON CONFLICT(day,provider) DO UPDATE SET used=avalon_ai_provider_daily_quota.used+1',[day,provider]);
   await client.query('COMMIT');return {ok:true,game:counts.game+1};
  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+}
+
+// Circuit breaker persists across application restarts and is shared between seats.
+// This stores no secrets. 429 cooldown does not refund an already attempted call.
+export async function setProviderCooldown(provider,seconds=60){
+ const delay=Math.min(3600,Math.max(15,Math.ceil(Number(seconds)||60)));
+ if(!pool){localCooldown.set(provider,Math.max(localCooldown.get(provider)||0,Date.now()+delay*1000));return;}
+ await pool.query(`INSERT INTO avalon_ai_provider_cooldown(provider,until_at) VALUES($1,now()+($2::int * interval '1 second')) ON CONFLICT(provider) DO UPDATE SET until_at=GREATEST(avalon_ai_provider_cooldown.until_at,EXCLUDED.until_at)`,[provider,delay]);
+}
+export async function getProviderCooldowns(){
+ if(!pool)return Object.fromEntries([...localCooldown].filter(([_,v])=>v>Date.now()).map(([k,v])=>[k,new Date(v).toISOString()]));
+ const {rows}=await pool.query('SELECT provider,until_at FROM avalon_ai_provider_cooldown WHERE until_at>now()');
+ return Object.fromEntries(rows.map(x=>[x.provider,x.until_at]));
 }

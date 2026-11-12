@@ -1,6 +1,6 @@
 // Model request counters are conservative: attempted/failed requests count.
-export const DAILY_LIMIT=readLimit('AVALON_DAILY_CALL_LIMIT',50,1,10000);
-export const GAME_LIMIT=readLimit('AVALON_GAME_CALL_LIMIT',30,1,10000);
+export const DAILY_LIMIT=readLimit('AVALON_DAILY_CALL_LIMIT',150,1,10000);
+export const GAME_LIMIT=readLimit('AVALON_GAME_CALL_LIMIT',90,1,10000);
 export const SEAT_LIMIT=readLimit('AVALON_NPC_CALL_LIMIT',16,1,1000);
 export const PROVIDER_LIMITS=Object.freeze({
  gemini:readLimit('AVALON_GEMINI_DAILY_LIMIT',40,1,10000),
