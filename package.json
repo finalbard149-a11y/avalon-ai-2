@@ -1,6 +1,6 @@
 {
   "name": "avalon-ai-2-six-model",
-  "version": "2.6.0-beta.1",
+  "version": "2.6.1-beta.1",
   "type": "module",
   "private": true,
   "engines": {

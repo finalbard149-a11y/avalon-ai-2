@@ -50,8 +50,15 @@ export function requestSpec({seat,action,instructions,view,routeOverride=null}){
    body:{systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(view)}]}],generationConfig}};
  }
  const url=provider==='cloudflare' ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(process.env.CLOUDFLARE_ACCOUNT_ID||'')}/ai/v1/chat/completions` : URLS[provider];
- return {provider,model,url,headers:{'Content-Type':'application/json','Authorization':`Bearer ${process.env[keyName]}`},
-  body:{model,messages:[{role:'system',content:instructions},{role:'user',content:JSON.stringify(view)}],response_format:{type:'json_object'},temperature:action==='SPEAK'?0.65:0.2,max_tokens:action==='ASSASSINATE'?3000:1600}};
+ const body={model,messages:[{role:'system',content:instructions},{role:'user',content:JSON.stringify(view)}],response_format:{type:'json_object'},temperature:action==='SPEAK'?0.65:0.2,max_tokens:action==='ASSASSINATE'?3000:1600};
+ // GLM-4.7-Flash enables reasoning by default. Reasoning may exhaust max_tokens
+ // and leave choices[0].message.content empty. Cloudflare documents this setting.
+ if(provider==='cloudflare'&&model==='@cf/zai-org/glm-4.7-flash'){
+  body.chat_template_kwargs={enable_thinking:false};
+  body.max_completion_tokens=action==='ASSASSINATE'?2500:1500;
+  delete body.max_tokens;
+ }
+ return {provider,model,url,headers:{'Content-Type':'application/json','Authorization':`Bearer ${process.env[keyName]}`},body};
 }
 export function extractOutput(provider,raw){
  let content;
@@ -61,7 +68,12 @@ export function extractOutput(provider,raw){
   if(!content)throw Error(`AI_EMPTY_RESPONSE: Gemini 沒有輸出文字（${reason||'無結束原因'}）。`);
  }else{
   content=raw?.choices?.[0]?.message?.content;
-  if(typeof content!=='string'||!content)throw Error('AI_EMPTY_RESPONSE: 模型沒有輸出文字。');
+  // Cloudflare's OpenAI-compatible output can contain content as text parts.
+  if(Array.isArray(content))content=content.filter(x=>x?.type==='text'&&typeof x.text==='string').map(x=>x.text).join('');
+  if(typeof content!=='string'||!content.trim()){
+   const finish=String(raw?.choices?.[0]?.finish_reason||'unknown').slice(0,32);
+   throw Error(`AI_EMPTY_RESPONSE: ${provider} 未產生可用回答（finish_reason=${finish}）。請稍後重試；玩家發言已保存。`);
+  }
  }
  try{
   const obj=JSON.parse(content.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));
@@ -71,8 +83,8 @@ export function extractOutput(provider,raw){
 }
 export async function callProvider(spec,fetchImpl=fetch){
  let response;
- try{response=await fetchImpl(spec.url,{method:'POST',headers:spec.headers,body:JSON.stringify(spec.body),signal:AbortSignal.timeout(40000)});}
- catch(e){throw Error(`AI_NETWORK_ERROR: ${e.name==='TimeoutError'?'模型呼叫逾時':'無法連線到供應商'}；沒有切換模型。`);}
+ try{response=await fetchImpl(spec.url,{method:'POST',headers:spec.headers,body:JSON.stringify(spec.body),signal:AbortSignal.timeout(spec.provider==='cloudflare'?19000:35000)});}
+ catch(e){throw Error(`AI_NETWORK_ERROR: ${spec.provider} ${e.name==='TimeoutError'?'模型呼叫逾時':'無法連線到供應商'}；玩家發言已保存，可稍後重試。`);}
  if(!response.ok){
   const status=response.status;
   if(status===429){const err=new Error(`AI_QUOTA: ${spec.provider} 供應商免費額度或頻率已達限制。`);err.code='AI_QUOTA';const h=response.headers?.get?.('retry-after');const sec=h&&/^\d+$/.test(h)?Number(h):h&&Number.isFinite(Date.parse(h))?Math.ceil((Date.parse(h)-Date.now())/1000):60;err.retryAfterSeconds=Math.max(15,Math.min(3600,sec||60));throw err;}
