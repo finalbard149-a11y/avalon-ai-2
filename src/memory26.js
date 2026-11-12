@@ -13,7 +13,7 @@ export function biography(g,seat){
   if(e.type==='MISSION_RESULT') history.push({seq:e.seq,kind:'PUBLIC_MISSION_RESULT',round:p.round,team:p.team,success:p.success,fails:p.fails});
  }
  const own=g.npcMemory?.[seat]||{};
- return {history:history.slice(-35),ownMissionCards:(own.ownMissionCards||[]).slice(-7),selfNote:short(own.note,400),stances:own.stances||{},strategyNotes:(own.strategyNotes||[]).slice(-7),ownProposalReasons:(own.ownProposalReasons||[]).slice(-8)};
+ return {history:history.slice(-35),recentOwnWords:history.filter(x=>x.kind==='OWN_SPEECH').slice(-8),ownMissionCards:(own.ownMissionCards||[]).slice(-7),selfNote:short(own.note,400),stances:own.stances||{},strategyNotes:(own.strategyNotes||[]).slice(-7),ownProposalReasons:(own.ownProposalReasons||[]).slice(-8),ownVoteReasons:(own.ownVoteReasons||[]).slice(-12)};
 }
 function teamBefore(g,seq){const e=[...(g.events||[])].reverse().find(e=>e.seq<seq&&e.type==='PROPOSE');return e?.payload?.team||[];}
 function roundOf(g,seq){let r=1;for(const e of g.events||[]){if(e.seq>=seq)break;if(e.type==='MISSION_RESULT')r++;}return r;}
@@ -26,6 +26,9 @@ export function memoryPrompt(g,seat){
  const b=biography(g,seat);
  return {autobiography:b,accountabilityRules:[
  'When challenged about a past choice, acknowledge your own proposals, ballots, and speeches accurately.',
+ 'When asked about your vote, retrieve the matching ownVoteReasons record. The reason was recorded when you voted; do not invent a different one later. Do not reveal private faction knowledge automatically.',
+ 'Your recentOwnWords are verbatim public facts. Do not deny having uttered them; openly distinguish retracting a belief from never having stated it.',
+ 'If your latest claim contradicts a prior claim without new evidence, clearly acknowledge the change or deliberate public stance; do not manufacture a new event.',
  'A mission result can justify a changed suspicion, but NEVER claim an earlier reason was recorded when it was not.',
  'You may strategically lie, but remember your actual past actions and keep intentional deception distinct from false memories.',
  'Own mission cards are private; do not reveal them simply because they appear in memory.'
@@ -37,4 +40,10 @@ export function memoryPrompt(g,seat){
 export function rememberProposalReason(g,seat,team,reason,source){
  g.npcMemory??={};const m=g.npcMemory[seat]||{};const prev=m.ownProposalReasons||[];
  g.npcMemory[seat]={...m,ownProposalReasons:[...prev,{round:g.round,attempt:g.attempt,team:[...team],reason:reason?short(reason,240):null,source}].slice(-8)};
+}
+
+// Durable per-seat decision evidence. Called BEFORE committing its own vote.
+export function rememberVoteReason(g,seat,decision){
+ g.npcMemory??={};const old=g.npcMemory[seat]||{};
+ g.npcMemory[seat]={...old,ownVoteReasons:[...(old.ownVoteReasons||[]),structuredClone(decision)].slice(-20)};
 }

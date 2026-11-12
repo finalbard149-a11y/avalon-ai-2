@@ -6,8 +6,8 @@ import {createGame,publicState,knowledge,speak,propose,vote,mission,assassinate,
 import {decide,cloudEnabled} from './agents.js';
 import {DAILY_LIMIT,GAME_LIMIT} from './quota.js';
 import {routingStatus,routingMode} from './providers.js';
-import {rememberPrivateMission,rememberProposalReason} from './memory26.js';
-import {publicLogic} from './strategy.js';
+import {rememberPrivateMission,rememberProposalReason,rememberVoteReason} from './memory26.js';
+import {publicLogic,voteDecisionReason} from './strategy.js';
 import {initializeStore,getGame,getGameUsage,getProviderCooldowns,saveNewGame,mutateGame} from './store.js';
 import {authorized,checkConfig,checkPassword,sessionCookie,clearCookie} from './auth.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
@@ -21,7 +21,7 @@ async function aiAction(g,seat,action){
  try{
   if(action==='SPEAK')speak(g,seat,String(d.text||'我還需要更多資訊。').slice(0,120));
   else if(action==='PROPOSE'){propose(g,seat,d.team);rememberProposalReason(g,seat,d.team,d.reason,typeof d.reason==='string'?'AI_DECISION':'UNRECORDED');queueSpeakers(g,'PROPOSAL');}
-  else if(action==='VOTE')vote(g,seat,d.approve);
+  else if(action==='VOTE'){rememberVoteReason(g,seat,voteDecisionReason(g,seat,d.approve));vote(g,seat,d.approve);}
   else if(action==='MISSION'){const fail=EVIL.has(g.roles[seat])&&d.fail===true;rememberPrivateMission(g,seat,fail);mission(g,seat,fail);}
   else if(action==='ASSASSINATE'){
    const eligible=[1,2,3,4,5,6,7].filter(s=>validCandidate(g,seat,s));
@@ -35,7 +35,7 @@ async function aiAction(g,seat,action){
  }catch(e){
   g.audit.push({seat,action:'INVALID_ACTION',detail:String(e.message),eventSeq:g.revision});
   if(action==='PROPOSE')propose(g,seat,[1,2,3,4,5,6,7].slice(0,SIZES[g.round-1]));
-  else if(action==='VOTE')vote(g,seat,false);
+  else if(action==='VOTE'){rememberVoteReason(g,seat,voteDecisionReason(g,seat,false));vote(g,seat,false);}
   else if(action==='MISSION')mission(g,seat,false);
   else if(action==='SPEAK')speak(g,seat,'這個提案我還需要再評估。');
   else if(action==='ASSASSINATE'){const eligible=[1,2,3,4,5,6,7].filter(s=>validCandidate(g,seat,s));const target=eligible[Math.floor(Math.random()*eligible.length)];g.audit.push({seat,action:'ASSASSINATION_FALLBACK_COMMIT',target,preResult:true});assassinate(g,seat,target);}
