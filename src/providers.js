@@ -1,8 +1,8 @@
 // All provider calls are per-seat and receive only an authorized perspective.
 // Never send complete game state, other NPC memories, or identity assignments.
 import {NPC_SEATS,selectedRoute,sixModelEnabled} from './routing25.js';
-const PROVIDERS = new Set(['gemini','groq','openrouter']);
-const DEFAULT_MODELS = {gemini:'gemini-3.5-flash-lite',groq:'openai/gpt-oss-20b',openrouter:'openai/gpt-oss-20b:free'};
+const PROVIDERS = new Set(['gemini','groq','openrouter','cloudflare']);
+const DEFAULT_MODELS = {gemini:'gemini-3.5-flash-lite',groq:'openai/gpt-oss-20b',openrouter:'openai/gpt-oss-20b:free',cloudflare:'@cf/zai-org/glm-4.7-flash'};
 const SCHEMA={
  SPEAK:{type:'OBJECT',properties:{text:{type:'STRING'},beliefUpdate:{type:'OBJECT',properties:{note:{type:'STRING'},stances:{type:'ARRAY',items:{type:'OBJECT',properties:{seat:{type:'INTEGER'},score:{type:'NUMBER'}},required:['seat','score']}}},required:['note']}},required:['text','beliefUpdate']},
  PROPOSE:{type:'OBJECT',properties:{team:{type:'ARRAY',items:{type:'INTEGER'}}},required:['team']},
@@ -16,11 +16,12 @@ export function validateRoute(route,seat){
  const provider=route.provider;
  if(!PROVIDERS.has(provider))throw Error(`NPC ${seat}: invalid provider`);
  const model=route.model||DEFAULT_MODELS[provider];
- if(!/^[\w.\-/:]{3,100}$/.test(model))throw Error(`NPC ${seat}: invalid model identifier`);
+ if(!/^[\w.@\-/:]{3,100}$/.test(model))throw Error(`NPC ${seat}: invalid model identifier`);
  if(provider==='groq'&&!new Set(['openai/gpt-oss-20b','openai/gpt-oss-120b','llama-3.3-70b-versatile','llama-3.1-8b-instant','qwen/qwen3.8-27b']).has(model))throw Error(`NPC ${seat}: Groq model is not on the free-tier allowlist`);
+ if(provider==='cloudflare'&&!new Set(['@cf/zai-org/glm-4.7-flash','@cf/google/gemma-4-26b-a4b-it','@cf/nvidia/nemotron-3-120b-a12b']).has(model))throw Error(`NPC ${seat}: Cloudflare model is not on the Workers Free allowlist`);
  if(provider==='openrouter'&&!model.endsWith(':free'))throw Error(`NPC ${seat}: only OpenRouter :free models are allowed`);
- const keyName={gemini:'GEMINI_API_KEY',groq:'GROQ_API_KEY',openrouter:'OPENROUTER_API_KEY'}[provider];
- return {provider,model,configured:Boolean(process.env[keyName]),keyName};
+ const keyName={gemini:'GEMINI_API_KEY',groq:'GROQ_API_KEY',openrouter:'OPENROUTER_API_KEY',cloudflare:'CLOUDFLARE_API_TOKEN'}[provider];
+ return {provider,model,configured:Boolean(process.env[keyName])&&(provider!=='cloudflare'||Boolean(process.env.CLOUDFLARE_ACCOUNT_ID)),keyName};
 }
 export function seatConfig(seat){return validateRoute(selectedRoute(seat),seat);}
 export function fallbackConfig(seat){
@@ -38,7 +39,7 @@ export function rosterReady(){return routingStatus().every(x=>x.configured);}
 export function anyCloudConfigured(){return routingStatus().some(x=>x.configured);}
 export function requestSpec({seat,action,instructions,view,routeOverride=null}){
  const config=routeOverride?validateRoute(routeOverride,seat):seatConfig(seat);
- if(!config.configured)throw Error(`AI_PROVIDER_NOT_CONFIGURED: ${seat} 號 NPC 缺少 ${config.keyName}，請到 Railway 設定；不會默默改用其他模型。`);
+ if(!config.configured)throw Error(`AI_PROVIDER_NOT_CONFIGURED: ${seat} 號 NPC 缺少 ${config.provider==='cloudflare'?'CLOUDFLARE_API_TOKEN 或 CLOUDFLARE_ACCOUNT_ID':config.keyName}，請到 Railway 設定；不會默默改用其他模型。`);
  const {provider,model,keyName}=config;
  if(provider==='gemini'){
   const generationConfig={responseMimeType:'application/json',responseSchema:SCHEMA[action],maxOutputTokens:action==='ASSASSINATE'?3000:1800};
@@ -48,7 +49,8 @@ export function requestSpec({seat,action,instructions,view,routeOverride=null}){
    headers:{'Content-Type':'application/json','x-goog-api-key':process.env[keyName]},
    body:{systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(view)}]}],generationConfig}};
  }
- return {provider,model,url:URLS[provider],headers:{'Content-Type':'application/json','Authorization':`Bearer ${process.env[keyName]}`},
+ const url=provider==='cloudflare' ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(process.env.CLOUDFLARE_ACCOUNT_ID||'')}/ai/v1/chat/completions` : URLS[provider];
+ return {provider,model,url,headers:{'Content-Type':'application/json','Authorization':`Bearer ${process.env[keyName]}`},
   body:{model,messages:[{role:'system',content:instructions},{role:'user',content:JSON.stringify(view)}],response_format:{type:'json_object'},temperature:action==='SPEAK'?0.65:0.2,max_tokens:action==='ASSASSINATE'?3000:1600}};
 }
 export function extractOutput(provider,raw){
@@ -73,7 +75,7 @@ export async function callProvider(spec,fetchImpl=fetch){
  catch(e){throw Error(`AI_NETWORK_ERROR: ${e.name==='TimeoutError'?'模型呼叫逾時':'無法連線到供應商'}；沒有切換模型。`);}
  if(!response.ok){
   const status=response.status;
-  if(status===429)throw Error('AI_QUOTA: 供應商免費額度或頻率已達限制。');
+  if(status===429)throw Error(`AI_QUOTA: ${spec.provider} 供應商免費額度或頻率已達限制。`);
   if(status===401||status===403)throw Error('AI_AUTH: API Key 或模型權限有問題。');
   if(status===404)throw Error('AI_MODEL_NOT_FOUND: 目前設定的模型無法使用，請核對供應商模型清單。');
   throw Error(`AI_HTTP_${status}: 模型請求失敗；不會改用付費模型。`);
