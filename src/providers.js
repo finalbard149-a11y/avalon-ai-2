@@ -1,6 +1,7 @@
 // All provider calls are per-seat and receive only an authorized perspective.
 // Never send complete game state, other NPC memories, or identity assignments.
 import {NPC_SEATS,selectedRoute,sixModelEnabled} from './routing25.js';
+import {promptFootprint} from './prompt263.js';
 const PROVIDERS = new Set(['gemini','groq','openrouter','cloudflare']);
 const DEFAULT_MODELS = {gemini:'gemini-3.5-flash-lite',groq:'openai/gpt-oss-20b',openrouter:'openai/gpt-oss-20b:free',cloudflare:'@cf/zai-org/glm-4.7-flash'};
 const SCHEMA={
@@ -81,17 +82,32 @@ export function extractOutput(provider,raw){
   return obj;
  }catch{throw Error('AI_INVALID_JSON: 模型回傳的 JSON 格式無效，已保留玩家操作，可重試；沒有改用付費模型。');}
 }
+// Provider telemetry never logs prompt content, role knowledge, cookies or API keys.
 export async function callProvider(spec,fetchImpl=fetch){
- let response;
+ const start=Date.now();let response;
+ const metric={provider:spec.provider,model:spec.model,...promptFootprint(spec)};
+ const log=(event,extra={})=>console.info('AI_USAGE '+JSON.stringify({...metric,event,elapsedMs:Date.now()-start,...extra}));
  try{response=await fetchImpl(spec.url,{method:'POST',headers:spec.headers,body:JSON.stringify(spec.body),signal:AbortSignal.timeout(spec.provider==='cloudflare'?19000:35000)});}
- catch(e){throw Error(`AI_NETWORK_ERROR: ${spec.provider} ${e.name==='TimeoutError'?'模型呼叫逾時':'無法連線到供應商'}；玩家發言已保存，可稍後重試。`);}
+ catch(e){log('network-error',{reason:e?.name==='TimeoutError'?'timeout':'transport'});throw Error(`AI_NETWORK_ERROR: ${spec.provider} ${e.name==='TimeoutError'?'模型呼叫逾時':'無法連線到供應商'}；玩家發言已保存，可稍後重試。`);}
  if(!response.ok){
   const status=response.status;
-  if(status===429){const err=new Error(`AI_QUOTA: ${spec.provider} 供應商免費額度或頻率已達限制。`);err.code='AI_QUOTA';const h=response.headers?.get?.('retry-after');const sec=h&&/^\d+$/.test(h)?Number(h):h&&Number.isFinite(Date.parse(h))?Math.ceil((Date.parse(h)-Date.now())/1000):60;err.retryAfterSeconds=Math.max(15,Math.min(3600,sec||60));throw err;}
+  if(status===429){
+   const err=new Error(`AI_QUOTA: ${spec.provider} 供應商回傳 HTTP 429（可能為頻率或額度限制），請稍候重試。`);
+   err.code='AI_QUOTA';const h=response.headers?.get?.('retry-after');
+   const sec=h&&/^\d+$/.test(h)?Number(h):h&&Number.isFinite(Date.parse(h))?Math.ceil((Date.parse(h)-Date.now())/1000):60;
+   err.retryAfterSeconds=Math.max(15,Math.min(3600,sec||60));
+   err.retryAfterSource=h?'header':'default';
+   log('rate-limited',{httpStatus:429,retryAfterSeconds:err.retryAfterSeconds,retryAfterSource:err.retryAfterSource});
+   throw err;
+  }
+  log('http-error',{httpStatus:status});
   if(status===401||status===403)throw Error('AI_AUTH: API Key 或模型權限有問題。');
   if(status===404)throw Error('AI_MODEL_NOT_FOUND: 目前設定的模型無法使用，請核對供應商模型清單。');
   throw Error(`AI_HTTP_${status}: 模型請求失敗；不會改用付費模型。`);
  }
- const data=await response.json().catch(()=>{throw Error('AI_INVALID_HTTP_JSON: 供應商回應無效。');});
+ const data=await response.json().catch(()=>{log('invalid-json');throw Error('AI_INVALID_HTTP_JSON: 供應商回應無效。');});
+ const usage= data?.usage || data?.usageMetadata || {};
+ const tokenCounts={inputTokens:Number.isFinite(usage.prompt_tokens)?usage.prompt_tokens:Number.isFinite(usage.promptTokenCount)?usage.promptTokenCount:null,outputTokens:Number.isFinite(usage.completion_tokens)?usage.completion_tokens:Number.isFinite(usage.candidatesTokenCount)?usage.candidatesTokenCount:null,totalTokens:Number.isFinite(usage.total_tokens)?usage.total_tokens:Number.isFinite(usage.totalTokenCount)?usage.totalTokenCount:null};
+ log('provider-response',{httpStatus:response.status||200,...tokenCounts});
  return extractOutput(spec.provider,data);
 }

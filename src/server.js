@@ -8,6 +8,7 @@ import {DAILY_LIMIT,GAME_LIMIT} from './quota.js';
 import {routingStatus,routingMode} from './providers.js';
 import {rememberPrivateMission,rememberProposalReason,rememberVoteReason} from './memory26.js';
 import {publicLogic,voteDecisionReason} from './strategy.js';
+import {inspectProposal,safeProposalFallback} from './proposalGuard263.js';
 import {initializeStore,getGame,getGameUsage,getProviderCooldowns,saveNewGame,mutateGame} from './store.js';
 import {authorized,checkConfig,checkPassword,sessionCookie,clearCookie} from './auth.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
@@ -20,7 +21,21 @@ async function aiAction(g,seat,action){
  const d=await decide(g,seat,action);
  try{
   if(action==='SPEAK')speak(g,seat,String(d.text||'我還需要更多資訊。').slice(0,120));
-  else if(action==='PROPOSE'){propose(g,seat,d.team);rememberProposalReason(g,seat,d.team,d.reason,typeof d.reason==='string'?'AI_DECISION':'UNRECORDED');queueSpeakers(g,'PROPOSAL');}
+  else if(action==='PROPOSE'){
+   const check=inspectProposal(g,seat,d.team);
+   let selected=d,origin=typeof d.reason==='string'?'AI_DECISION':'UNRECORDED';
+   if(!check.ok){
+    selected=safeProposalFallback(g,seat);
+    origin='RULE_ENGINE_SAFE_FALLBACK';
+    g.audit??=[];
+    g.audit.push({seat,action:'PROPOSAL_GUARD_REJECTED',code:check.code,modelReturnedTeam:Array.isArray(d.team)?d.team:null,eventSeq:g.revision,time:new Date().toISOString()});
+    g.audit.push({seat,action:'SAFE_FALLBACK_PROPOSE',team:[...selected.team],source:'private-strategy-no-api',eventSeq:g.revision,time:new Date().toISOString()});
+    g.budgetNotice=`${seat} 號模型組隊未通過安全檢查（${check.code}），已由合法資訊策略引擎重新組隊。`;
+   }
+   propose(g,seat,selected.team);
+   rememberProposalReason(g,seat,selected.team,selected.reason,origin);
+   queueSpeakers(g,'PROPOSAL');
+  }
   else if(action==='VOTE'){rememberVoteReason(g,seat,voteDecisionReason(g,seat,d.approve));vote(g,seat,d.approve);}
   else if(action==='MISSION'){const fail=EVIL.has(g.roles[seat])&&d.fail===true;rememberPrivateMission(g,seat,fail);mission(g,seat,fail);}
   else if(action==='ASSASSINATE'){
@@ -34,7 +49,15 @@ async function aiAction(g,seat,action){
   }
  }catch(e){
   g.audit.push({seat,action:'INVALID_ACTION',detail:String(e.message),eventSeq:g.revision});
-  if(action==='PROPOSE')propose(g,seat,[1,2,3,4,5,6,7].slice(0,SIZES[g.round-1]));
+  if(action==='PROPOSE'){
+   // Never silently replace a bad proposal with the first numbered seats.
+   // The safe fallback uses only this captain's legal knowledge.
+   const selected=safeProposalFallback(g,seat);
+   g.audit.push({seat,action:'SAFE_FALLBACK_PROPOSE',team:[...selected.team],source:'private-strategy-no-api',eventSeq:g.revision,time:new Date().toISOString()});
+   propose(g,seat,selected.team);
+   rememberProposalReason(g,seat,selected.team,selected.reason,'RULE_ENGINE_SAFE_FALLBACK');
+   queueSpeakers(g,'PROPOSAL');
+  }
   else if(action==='VOTE'){rememberVoteReason(g,seat,voteDecisionReason(g,seat,false));vote(g,seat,false);}
   else if(action==='MISSION')mission(g,seat,false);
   else if(action==='SPEAK')speak(g,seat,'這個提案我還需要再評估。');
